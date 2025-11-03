@@ -89,8 +89,9 @@ export default function App() {
 
   // --- Connect handler ---
   function handleConnect() {
-    setTtsEnabled(true);
-    setActiveTab("tts");
+    // symulacja połączenia z ServerTap i socketem
+    setConnected(true);
+    alert("✅ Połączono z ServerTap i Socket!");
   }
 
   return (
