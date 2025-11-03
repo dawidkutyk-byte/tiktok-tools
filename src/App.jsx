@@ -4,11 +4,27 @@ import io from "socket.io-client";
 export default function App() {
   const [activeTab, setActiveTab] = useState("connect");
 
-  // --- Connect form ---
+  // --- Config ---
   const [username, setUsername] = useState("widow_og");
   const [serverTapUrl, setServerTapUrl] = useState("http://83.168.106.220:21001");
   const [serverKey, setServerKey] = useState("change_me");
   const [wsUrl, setWsUrl] = useState("http://localhost:4000");
+
+  // --- Statusy ---
+  const [tiktokConnected, setTiktokConnected] = useState(false);
+  const [serverTapConnected, setServerTapConnected] = useState(false);
+  const [message, setMessage] = useState(null);
+
+  // --- TTS ---
+  const [ttsEnabled, setTtsEnabled] = useState(false);
+  const [rate, setRate] = useState(1);
+  const [pitch, setPitch] = useState(1);
+  const [volume, setVolume] = useState(1);
+  const [voiceName, setVoiceName] = useState("");
+  const [voices, setVoices] = useState([]);
+  const [connected, setConnected] = useState(false);
+  const [messages, setMessages] = useState([]);
+  const socketRef = useRef(null);
 
   // --- Gifts ---
   const [giftsText, setGiftsText] = useState(`{
@@ -19,18 +35,7 @@ export default function App() {
   ]
 }`);
 
-  // --- TTS Chat ---
-  const [ttsEnabled, setTtsEnabled] = useState(false);
-  const [connected, setConnected] = useState(false);
-  const [messages, setMessages] = useState([]);
-  const [voices, setVoices] = useState([]);
-  const [voiceName, setVoiceName] = useState("");
-  const [rate, setRate] = useState(1);
-  const [pitch, setPitch] = useState(1);
-  const [volume, setVolume] = useState(1);
-  const socketRef = useRef(null);
-
-  // Load voices
+  // === VOICES ===
   useEffect(() => {
     function loadVoices() {
       const v = window.speechSynthesis.getVoices();
@@ -39,23 +44,23 @@ export default function App() {
     }
     loadVoices();
     window.speechSynthesis.onvoiceschanged = loadVoices;
-    return () => { window.speechSynthesis.onvoiceschanged = null; };
   }, [voiceName]);
 
-  // Handle TTS connection
+  // === TTS SOCKET ===
   useEffect(() => {
     if (!ttsEnabled) {
       if (socketRef.current) {
         socketRef.current.disconnect();
         socketRef.current = null;
+        setConnected(false);
       }
-      setConnected(false);
       return;
     }
 
     try {
       const socket = io(wsUrl, { transports: ["websocket"] });
       socketRef.current = socket;
+
       socket.on("connect", () => setConnected(true));
       socket.on("disconnect", () => setConnected(false));
 
@@ -72,97 +77,166 @@ export default function App() {
     }
   }, [ttsEnabled, wsUrl]);
 
-  // --- Speech ---
+  // === FUNKCJE ===
   function speakText(text) {
     if (!ttsEnabled || !window.speechSynthesis) return;
     const u = new SpeechSynthesisUtterance(text);
     u.rate = rate;
     u.pitch = pitch;
     u.volume = volume;
-    if (voiceName) {
-      const v = voices.find((x) => x.name === voiceName);
-      if (v) u.voice = v;
-    }
+    const v = voices.find((x) => x.name === voiceName);
+    if (v) u.voice = v;
     window.speechSynthesis.cancel();
     window.speechSynthesis.speak(u);
   }
 
-  // --- Connect handler ---
-  function handleConnect() {
-    // symulacja połączenia z ServerTap i socketem
-    setConnected(true);
-    alert("✅ Połączono z ServerTap i Socket!");
+  async function handleConnectTikTok() {
+    try {
+      const res = await fetch(`https://www.tiktok.com/@${username}/live`, { method: "HEAD" });
+      if (res.ok) {
+        setTiktokConnected(true);
+        setMessage({ type: "success", text: "✅ TikTok LIVE znaleziony!" });
+        if (ttsEnabled) speakText("Połączono z TikTok LIVE.");
+      } else {
+        setTiktokConnected(false);
+        setMessage({ type: "error", text: "❌ Brak aktywnego LIVE na TikToku." });
+      }
+    } catch {
+      setTiktokConnected(false);
+      setMessage({ type: "error", text: "❌ Nie udało się połączyć z TikTok." });
+    }
+  }
+
+  async function handleConnectServerTap() {
+    try {
+      const res = await fetch(`${serverTapUrl}/v1/ping`, {
+        headers: { "Server-Key": serverKey },
+      });
+      if (res.ok) {
+        setServerTapConnected(true);
+        setMessage({ type: "success", text: "✅ Połączono z ServerTap!" });
+      } else {
+        throw new Error("Błąd odpowiedzi serwera");
+      }
+    } catch {
+      setServerTapConnected(false);
+      setMessage({ type: "error", text: "❌ Nie udało się połączyć z ServerTap." });
+    }
+  }
+
+  async function triggerTestGift() {
+    if (!serverTapConnected) {
+      alert("⚠️ Najpierw połącz z ServerTap!");
+      return;
+    }
+
+    const cmds = [
+      `execute as @a at @s run summon zombie ~ ~ ~ {CustomName:'{"text":"TEST"}',CustomNameVisible:1b}`,
+      `title @a title {"text":"🎁 TEST","color":"red","bold":true}`,
+      `title @a subtitle {"text":"Działa połączenie!","color":"blue","italic":true}`
+    ];
+
+    for (const c of cmds) {
+      await fetch(`${serverTapUrl}/v1/server/execute`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Server-Key": serverKey,
+        },
+        body: JSON.stringify({ command: c }),
+      });
+    }
+    alert("🎉 Testowy gift trigger wysłany do ServerTap!");
   }
 
   return (
     <div style={{ display: "flex", height: "100vh", width: "100vw", fontFamily: 'Inter, ui-sans-serif, system-ui' }}>
       {/* Sidebar */}
       <aside style={{ width: 240, background: "#111827", color: "white", padding: 20 }}>
-        <h1 style={{ fontSize: 20, marginBottom: 20 }}>🎮 TikTok Tools</h1>
-        <button onClick={() => setActiveTab("connect")} style={{ width: "100%", marginBottom: 8 }}>🔌 Connect</button>
+        <h1 style={{ fontSize: 20, fontWeight: 600 }}>🎮 TikTok Tools</h1>
+        <button onClick={() => setActiveTab("connect")} style={{ width: "100%", marginBottom: 8 }}>🔗 Connect</button>
         <button onClick={() => setActiveTab("gifts")} style={{ width: "100%", marginBottom: 8 }}>🎁 Gifts</button>
         <button onClick={() => setActiveTab("tts")} style={{ width: "100%" }}>🗣️ TTS Chat</button>
+        <div style={{ marginTop: 20 }}>
+          <a href="https://tapujemy.pl/gifts" target="_blank" rel="noreferrer" style={{ color: "#22d3ee" }}>
+            🌐 Strona z ID giftami
+          </a>
+        </div>
       </aside>
 
-      {/* Main */}
+      {/* Main content */}
       <main style={{ flex: 1, padding: 24, background: '#0b1220', color: '#e6edf3', overflowY: 'auto' }}>
-        {/* Connect tab */}
         {activeTab === "connect" && (
           <div>
-            <h2>🔌 Połącz z ServerTap i TTS</h2>
-            <p>Login do pluginu</p>
-            <label>TikTok username:</label>
-            <input value={username} onChange={(e) => setUsername(e.target.value)} style={{ width: "100%", marginBottom: 10 }} />
-            <p>ServerTap URL:</p>
-            <input value={serverTapUrl} onChange={(e) => setServerTapUrl(e.target.value)} style={{ width: "100%", marginBottom: 10 }} />
-            <p>Server Key:</p>
-            <input value={serverKey} onChange={(e) => setServerKey(e.target.value)} style={{ width: "100%", marginBottom: 10 }} />
-            <p>Socket URL:</p>
-            <input value={wsUrl} onChange={(e) => setWsUrl(e.target.value)} style={{ width: "100%", marginBottom: 10 }} />
-            <button onClick={handleConnect} style={{ background: '#10b981', border: 'none', padding: '10px 16px', borderRadius: 6, color: 'white' }}>Połącz</button>
+            <h2>🔗 Połączenia</h2>
+
+            <div style={{ marginBottom: 20 }}>
+              <h3>🎥 TikTok</h3>
+              <label>TikTok username:</label>
+              <input value={username} onChange={(e) => setUsername(e.target.value)} style={{ width: "100%", padding: 8, marginTop: 4 }} />
+              <button onClick={handleConnectTikTok} style={{ marginTop: 10, background: "#0ea5a4", padding: "8px 12px", border: "none", borderRadius: 6, color: "#fff" }}>Połącz z TikTok</button>
+              <p>Status: {tiktokConnected ? "🟢 Połączono" : "🔴 Niepołączono"}</p>
+            </div>
+
+            <div>
+              <h3>🖥️ ServerTap</h3>
+              <label>ServerTap URL:</label>
+              <input value={serverTapUrl} onChange={(e) => setServerTapUrl(e.target.value)} style={{ width: "100%", padding: 8, marginTop: 4 }} />
+              <label>ServerTap Key:</label>
+              <input value={serverKey} onChange={(e) => setServerKey(e.target.value)} style={{ width: "100%", padding: 8, marginTop: 4 }} />
+              <button onClick={handleConnectServerTap} style={{ marginTop: 10, background: "#16a34a", padding: "8px 12px", border: "none", borderRadius: 6, color: "#fff" }}>Połącz z ServerTap</button>
+              <p>Status: {serverTapConnected ? "🟢 Połączono" : "🔴 Niepołączono"}</p>
+            </div>
           </div>
         )}
 
-        {/* Gifts tab */}
         {activeTab === "gifts" && (
           <div>
-            <h2>🎁 Gifts Config</h2>
-            <h4 style={{ marginTop: 20 }}>🌐 Strona z ID giftami:</h4>
-            <a href="https://tapujemy.pl/gifts" target="_blank" rel="noreferrer" style={{ color: "#22d3ee" }}>
-              https://tapujemy.pl/gifts
-            </a>
-            <h4 style={{ marginTop: 20 }}>Gift Trigger</h4>
-            <textarea
-              rows={12}
-              value={giftsText}
-              onChange={(e) => setGiftsText(e.target.value)}
-              style={{ width: "100%", marginTop: 10, borderRadius: 8, padding: 10 }}
-            />
+            <h2>🎁 Gift Trigger</h2>
+            <p>Użyj tego testowego triggera, aby sprawdzić połączenie z serwerem.</p>
+
+            <pre style={{ background: "#081226", padding: 10, borderRadius: 6, color: "#cbd5e1", fontSize: 13 }}>
+{`{
+  "5479": [
+    "execute as @a at @s run summon zombie ~ ~ ~ {DragonPhase:0,CustomName:'{\\"text\\":\\"{nickname}\\"}',CustomNameVisible:1b,Invisible:1b,Marker:1b}",
+    "title @a title {\\"text\\":\\"🎁 TEST\\",\\"color\\":\\"red\\",\\"bold\\":true}",
+    "title @a subtitle {\\"text\\":\\"{nickname} TEST\\",\\"color\\":\\"blue\\",\\"italic\\":true}"
+  ]
+}`}
+            </pre>
+            <button onClick={triggerTestGift} style={{ marginTop: 10, background: "#f97316", padding: "8px 12px", border: "none", borderRadius: 6, color: "#fff" }}>Test Trigger</button>
+
+            <h3 style={{ marginTop: 30 }}>🎨 Własne Gifts</h3>
+            <p>Strona z ID giftami: <a href="https://tapujemy.pl/gifts" target="_blank" rel="noreferrer" style={{ color: "#22d3ee" }}>tapujemy.pl/gifts</a></p>
+            <textarea value={giftsText} onChange={(e) => setGiftsText(e.target.value)} rows={12} style={{ width: "100%", padding: 8, background: "#071022", color: "#e6edf3", borderRadius: 6, marginTop: 8, fontFamily: "monospace" }} />
           </div>
         )}
 
-        {/* TTS tab */}
         {activeTab === "tts" && (
           <div>
             <h2>🗣️ TTS Chat</h2>
-            <button onClick={() => setTtsEnabled(!ttsEnabled)} style={{ background: ttsEnabled ? '#ef4444' : '#10b981', border: 'none', padding: '10px 16px', borderRadius: 6, color: 'white', marginBottom: 10 }}>
+            <button onClick={() => setTtsEnabled(!ttsEnabled)} style={{ background: ttsEnabled ? "#dc2626" : "#10b981", color: "#fff", padding: "8px 12px", border: "none", borderRadius: 6 }}>
               {ttsEnabled ? "Wyłącz TTS" : "Włącz TTS"}
             </button>
-            <p>Status: {connected ? "🟢 Połączono" : "🔴 Rozłączono"}</p>
-            <label>Wybierz głos:</label>
-            <select value={voiceName} onChange={(e) => setVoiceName(e.target.value)} style={{ width: "100%", marginBottom: 10 }}>
+            <p>Status: {connected ? "🟢 Połączono z czatem" : "🔴 Niepołączono"}</p>
+            <select value={voiceName} onChange={(e) => setVoiceName(e.target.value)} style={{ marginTop: 10, padding: 8 }}>
               {voices.map((v) => (
                 <option key={v.name}>{v.name}</option>
               ))}
             </select>
-
-            <div style={{ maxHeight: "60vh", overflowY: "auto", background: "#1e293b", padding: 10, borderRadius: 8 }}>
+            <div style={{ marginTop: 10 }}>
               {messages.map((m, i) => (
                 <div key={i}>
                   <b>{m.nick}</b>: {m.text}
                 </div>
               ))}
             </div>
+          </div>
+        )}
+
+        {message && (
+          <div style={{ marginTop: 12, padding: 10, borderRadius: 8, background: message.type === 'error' ? '#dc2626' : '#16a34a' }}>
+            {message.text}
           </div>
         )}
       </main>
