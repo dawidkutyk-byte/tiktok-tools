@@ -95,7 +95,7 @@ export default function App() {
   }
 
   return (
-    <div style={{ display: "flex", minHeight: "100vh", fontFamily: "sans-serif" }}>
+  <div style={{ display: "flex", height: "100vh", width: "100vw", fontFamily: 'Inter, ui-sans-serif, system-ui' }}>
       <aside style={{ width: 240, background: "#111827", color: "white", padding: 20 }}>
         <h1 style={{ fontSize: 20 }}>🎮 TikTok Tools</h1>
         <button onClick={() => setActiveTab("gifts")} style={{ width: "100%", marginBottom: 8 }}>🎁 Gifts</button>
@@ -106,8 +106,19 @@ export default function App() {
           </a>
         </div>
       </aside>
+<main
+  style={{
+    flex: 1,
+    padding: 24,
+    background: '#0b1220',
+    color: '#e6edf3',
+    width: '100%',
+    minHeight: '100vh',
+    display: 'flex',
+    flexDirection: 'column',
+  }}
+>
 
-      <main style={{ flex: 1, padding: 24, background: "#0b1220", color: "white" }}>
         {activeTab === "gifts" && (
           <div>
             <h2>🎁 Gifts Config</h2>
