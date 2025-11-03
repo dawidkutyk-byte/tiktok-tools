@@ -58,11 +58,24 @@ export default function App() {
     }
 
     try {
-      const socket = io(wsUrl, { transports: ["websocket"] });
+      const socket = io(wsUrl, { transports: ["websocket"], reconnectionAttempts: 3 });
+
       socketRef.current = socket;
 
-      socket.on("connect", () => setConnected(true));
-      socket.on("disconnect", () => setConnected(false));
+      socket.on("connect", () => {
+        console.log("✅ Połączono z serwerem TTS:", wsUrl);
+        setConnected(true);
+      });
+
+      socket.on("connect_error", (err) => {
+        console.error("❌ Błąd połączenia z TTS:", err.message);
+        setConnected(false);
+      });
+
+      socket.on("disconnect", () => {
+        console.log("🔴 Rozłączono z TTS");
+        setConnected(false);
+      });
 
       socket.on("chat", (data) => {
         const nick = data.nickname || "Anon";
@@ -109,16 +122,18 @@ export default function App() {
 
   async function handleConnectServerTap() {
     try {
-      const res = await fetch(`${serverTapUrl}/v1/ping`, {
+      const res = await fetch(`${serverTapUrl}/v1/server`, {
         headers: { "Server-Key": serverKey },
       });
       if (res.ok) {
         setServerTapConnected(true);
         setMessage({ type: "success", text: "✅ Połączono z ServerTap!" });
       } else {
+        console.error("ServerTap status:", res.status);
         throw new Error("Błąd odpowiedzi serwera");
       }
-    } catch {
+    } catch (err) {
+      console.error("ServerTap error:", err);
       setServerTapConnected(false);
       setMessage({ type: "error", text: "❌ Nie udało się połączyć z ServerTap." });
     }
@@ -137,7 +152,7 @@ export default function App() {
     ];
 
     for (const c of cmds) {
-      await fetch(`${serverTapUrl}/v1/server/execute`, {
+      await fetch(`${serverTapUrl}/v1/server/exec`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -180,6 +195,17 @@ export default function App() {
 
             <div>
               <h3>🖥️ ServerTap</h3>
+              <p>
+                📦{" "}
+                <a
+                  href="https://github.com/TimeCodings/servertap/releases/download/v0.5.4/ServerTap-0.5.4-SNAPSHOT.jar"
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ color: "#22d3ee" }}
+                >
+                  Pobierz ServerTap (v0.5.4)
+                </a>
+              </p>
               <label>ServerTap URL:</label>
               <input value={serverTapUrl} onChange={(e) => setServerTapUrl(e.target.value)} style={{ width: "100%", padding: 8, marginTop: 4 }} />
               <label>ServerTap Key:</label>
@@ -207,6 +233,7 @@ export default function App() {
             <button onClick={triggerTestGift} style={{ marginTop: 10, background: "#f97316", padding: "8px 12px", border: "none", borderRadius: 6, color: "#fff" }}>Test Trigger</button>
 
             <h3 style={{ marginTop: 30 }}>🎨 Własne Gifts</h3>
+            <p><b>LIMIT 10 INTERAKCJI</b></p>
             <p>Strona z ID giftami: <a href="https://tapujemy.pl/gifts" target="_blank" rel="noreferrer" style={{ color: "#22d3ee" }}>tapujemy.pl/gifts</a></p>
             <textarea value={giftsText} onChange={(e) => setGiftsText(e.target.value)} rows={12} style={{ width: "100%", padding: 8, background: "#071022", color: "#e6edf3", borderRadius: 6, marginTop: 8, fontFamily: "monospace" }} />
           </div>
@@ -219,6 +246,9 @@ export default function App() {
               {ttsEnabled ? "Wyłącz TTS" : "Włącz TTS"}
             </button>
             <p>Status: {connected ? "🟢 Połączono z czatem" : "🔴 Niepołączono"}</p>
+            {!connected && ttsEnabled && (
+              <p style={{ color: "#f87171" }}>⚠️ Nie można połączyć się z TTS serwerem ({wsUrl})</p>
+            )}
             <select value={voiceName} onChange={(e) => setVoiceName(e.target.value)} style={{ marginTop: 10, padding: 8 }}>
               {voices.map((v) => (
                 <option key={v.name}>{v.name}</option>
@@ -243,4 +273,3 @@ export default function App() {
     </div>
   );
 }
-
