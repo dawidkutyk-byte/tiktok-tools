@@ -8,6 +8,7 @@ export default function App() {
   const [serverKey, setServerKey] = useState("change_me");
   const [isTikTokConnected, setIsTikTokConnected] = useState(false);
   const [isServerTapConnected, setIsServerTapConnected] = useState(false);
+  const [ttsEnabled, setTtsEnabled] = useState(false);
   const [message, setMessage] = useState(null);
 
   const socketRef = useRef(null);
@@ -15,79 +16,64 @@ export default function App() {
   const [giftsText, setGiftsText] = useState(`{
   "5479": [
     "execute as @a at @s run summon zombie ~ ~ ~ {CustomName:'{\\"text\\":\\"{nickname}\\"}',CustomNameVisible:1b}",
-    "title @a title {\\"text\\":\\"🎁 TEST\\",\\"color\\":\\"red\\",\\"bold\\":true}"
+    "title @a title {\\"text\\":\\"🎁 RÓŻYCZKA!\\",\\"color\\":\\"light_purple\\"}"
   ]
 }`);
 
-  // --- 🔌 POŁĄCZENIE Z BACKENDEM (socket.io) ---
+  // --- 🔌 Połączenie z backendem socket.io ---
   useEffect(() => {
     const socket = io("/", { path: "/api/socket" });
     socketRef.current = socket;
 
-    socket.on("connect", () => console.log("🟢 Połączono z backendem"));
+    socket.on("connect", () => console.log("✅ Połączono z backendem"));
+
     socket.on("tiktokConnected", (u) => {
       setIsTikTokConnected(true);
       setMessage({ type: "success", text: `✅ Połączono z TikTok Live: ${u}` });
-    });
-    socket.on("tiktokDisconnected", () => {
-      setIsTikTokConnected(false);
-      setMessage({ type: "error", text: "❌ Rozłączono z TikTok Live" });
     });
 
     socket.on("gift", async (data) => {
       const gifts = JSON.parse(giftsText);
       const giftId = data.giftId?.toString();
       const nickname = data.user?.uniqueId;
+      const repeatcount = data.repeatCount || 1;
 
       if (gifts[giftId]) {
         for (let cmd of gifts[giftId]) {
-          cmd = cmd.replace(/{nickname}/g, nickname);
+          cmd = cmd.replace(/{nickname}/g, nickname).replace(/{repeatcount}/g, repeatcount);
           await sendCommandToServerTap(cmd);
         }
       }
     });
 
-    return () => socket.disconnect();
-  }, [giftsText]);
+    socket.on("chat", (data) => {
+      if (ttsEnabled) {
+        const text = `${data.nickname} mówi: ${data.comment}`;
+        const u = new SpeechSynthesisUtterance(text);
+        u.lang = "pl-PL";
+        window.speechSynthesis.speak(u);
+      }
+    });
 
+    return () => socket.disconnect();
+  }, [ttsEnabled, giftsText]);
+
+  // --- 📡 Połączenie z TikTok ---
   function connectTikTok() {
     socketRef.current.emit("connectTikTok", username);
   }
 
-  // --- 🧪 TEST TRIGGER ---
+  // --- 🧪 Test triggera ---
   async function testTrigger() {
     if (!isServerTapConnected) {
       setMessage({ type: "error", text: "Brak połączenia z ServerTap!" });
       return;
     }
-    const command =
-      'execute as @a at @s run summon zombie ~ ~ ~ {CustomName:\'{"text":"TEST ZOMBIE"}\',CustomNameVisible:1b}';
-    await sendCommandToServerTap(command);
+    const cmd = 'execute as @a at @s run summon zombie ~ ~ ~ {CustomName:\'{"text":"TEST"}\',CustomNameVisible:1b}';
+    await sendCommandToServerTap(cmd);
   }
 
-  // --- WYSYŁANIE KOMEND DO SERVERTAP ---
-  async function sendCommandToServerTap(command) {
-    try {
-      const body = new URLSearchParams({ command, time: "" });
-      const res = await fetch(`${serverTapUrl}/v1/server/exec`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-          key: serverKey,
-        },
-        body,
-      });
-
-      if (res.ok) {
-        setMessage({ type: "success", text: "✅ Komenda wysłana!" });
-      } else {
-        setMessage({ type: "error", text: "⚠️ Błąd wysyłania komendy." });
-      }
-    } catch (err) {
-      setMessage({ type: "error", text: "❌ Brak połączenia z ServerTap." });
-    }
-  }
-
+  // --- 🔗 Połączenie z ServerTap ---
   async function connectServerTap() {
     try {
       const resp = await fetch(`${serverTapUrl}/v1/server`, { headers: { key: serverKey } });
@@ -99,28 +85,52 @@ export default function App() {
         setMessage({ type: "error", text: "❌ Nie udało się połączyć z ServerTap." });
       }
     } catch {
-      setMessage({ type: "error", text: "❌ Błąd podczas łączenia z ServerTap." });
+      setIsServerTapConnected(false);
+      setMessage({ type: "error", text: "❌ Błąd łączenia z ServerTap." });
     }
   }
 
-  // --- UI ---
+  // --- 💥 Wysyłanie komend do Minecrafta ---
+  async function sendCommandToServerTap(command) {
+    try {
+      const res = await fetch(`${serverTapUrl}/v1/server/exec`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          key: serverKey,
+        },
+        body: new URLSearchParams({ command, time: "" }),
+      });
+
+      if (res.ok) {
+        setMessage({ type: "success", text: "✅ Komenda wysłana do Minecrafta!" });
+      } else {
+        const err = await res.text();
+        setMessage({ type: "error", text: `⚠️ Błąd: ${err}` });
+      }
+    } catch {
+      setMessage({ type: "error", text: "❌ Nie udało się połączyć z ServerTap." });
+    }
+  }
+
   return (
-    <div style={{ display: "flex", width: "100vw", height: "100vh", background: "#0b1220", color: "white" }}>
-      <aside style={{ width: 220, background: "#111827", padding: 20 }}>
-        <h2>🎮 TikTok Tools</h2>
+    <div className="flex w-screen h-screen bg-[#0b1220] text-white font-sans">
+      <aside className="w-60 bg-[#111827] p-4 flex flex-col">
+        <h1 className="text-xl mb-4">🎮 TikTok Tools</h1>
         <button onClick={() => setActiveTab("connect")}>🔗 Connect</button>
         <button onClick={() => setActiveTab("gifts")}>🎁 Gifts</button>
+        <button onClick={() => setActiveTab("tts")}>🗣️ TTS Chat</button>
       </aside>
 
-      <main style={{ flex: 1, padding: 20 }}>
+      <main className="flex-1 p-4 overflow-y-auto">
         {activeTab === "connect" && (
           <div>
-            <h3>Połączenia</h3>
-            <p>TikTok Username:</p>
+            <h2>Połączenia</h2>
+            <p>TikTok username:</p>
             <input value={username} onChange={(e) => setUsername(e.target.value)} />
             <button onClick={connectTikTok}>Połącz z TikTok</button>
 
-            <p>ServerTap URL:</p>
+            <p className="mt-4">ServerTap URL:</p>
             <input value={serverTapUrl} onChange={(e) => setServerTapUrl(e.target.value)} />
             <p>Server Key:</p>
             <input value={serverKey} onChange={(e) => setServerKey(e.target.value)} />
@@ -130,11 +140,11 @@ export default function App() {
 
         {activeTab === "gifts" && (
           <div>
-            <h3>🎁 Gift Trigger</h3>
+            <h2>🎁 Gifts</h2>
             <p>
               🔗 Lista ID:{" "}
               <a href="https://tapujemy.pl/gifts" target="_blank" style={{ color: "#22d3ee" }}>
-                tapujemy.pl/gifts
+                https://tapujemy.pl/gifts
               </a>
             </p>
             <textarea rows={10} value={giftsText} onChange={(e) => setGiftsText(e.target.value)} />
@@ -142,8 +152,18 @@ export default function App() {
           </div>
         )}
 
+        {activeTab === "tts" && (
+          <div>
+            <h2>🗣️ TTS Chat</h2>
+            <button onClick={() => setTtsEnabled(!ttsEnabled)}>
+              {ttsEnabled ? "Wyłącz TTS" : "Włącz TTS"}
+            </button>
+            <p>Status: {ttsEnabled ? "🟢 Aktywny" : "🔴 Nieaktywny"}</p>
+          </div>
+        )}
+
         {message && (
-          <div style={{ marginTop: 10, color: message.type === "error" ? "red" : "lightgreen" }}>
+          <div style={{ marginTop: 20, color: message.type === "error" ? "red" : "lightgreen" }}>
             {message.text}
           </div>
         )}
