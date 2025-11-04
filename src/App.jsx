@@ -60,21 +60,40 @@ export default function App() {
     }
   }
 
-  async function testTrigger() {
-    if (!isServerTapConnected) {
-      setMessage({ type: "error", text: "Brak połączenia z ServerTap!" });
-      return;
-    }
-    const command =
-      'execute as @a at @s run summon zombie ~ ~ ~ {CustomName:\'{"text":"TEST ZOMBIE"}\',CustomNameVisible:1b}';
+async function testTrigger() {
+  if (!isServerTapConnected) {
+    setMessage({ type: "error", text: "Brak połączenia z ServerTap!" });
+    return;
+  }
+
+  const command =
+    'execute as @a at @s run summon zombie ~ ~ ~ {CustomName:\'{"text":"TEST ZOMBIE"}\',CustomNameVisible:1b}';
+
+  try {
     const res = await fetch("/api/servertap?action=send-command", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ command }),
+      body: JSON.stringify({
+        command,
+        serverUrl: serverTapUrl,
+        serverKey: serverKey,
+      }),
     });
+
     const data = await res.json();
-    setMessage({ type: "info", text: data.message || "Komenda wysłana" });
+    if (data.ok) {
+      setMessage({ type: "success", text: "✅ Komenda wysłana do Minecrafta!" });
+    } else {
+      setMessage({
+        type: "error",
+        text: data.error || "❌ Błąd podczas wysyłania komendy.",
+      });
+    }
+  } catch (err) {
+    setMessage({ type: "error", text: "❌ Błąd połączenia z API." });
   }
+}
+
 
   // --- TTS CHAT (socket.io) ---
   useEffect(() => {
