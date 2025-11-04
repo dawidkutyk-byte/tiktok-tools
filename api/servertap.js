@@ -1,34 +1,54 @@
-// /api/servertap.js
+// api/servertap.js
+import axios from "axios";
+import querystring from "querystring";
+
 export default async function handler(req, res) {
-  if (req.method !== "POST") {
-    return res.status(405).json({ ok: false, error: "Only POST allowed" });
+  const { action } = req.query;
+
+  // Ustawienia z requestu (przekazywane z frontu)
+  const { serverUrl, serverKey, command } = req.body || {};
+
+  if (!serverUrl || !serverKey) {
+    return res.status(400).json({ error: "Brak ServerTap URL lub klucza." });
   }
 
   try {
-    const { command, serverTapUrl, serverKey } = req.body;
-
-    if (!command || !serverTapUrl || !serverKey) {
-      return res.status(400).json({ ok: false, error: "Missing parameters" });
+    if (action === "test") {
+      // Testowe połączenie - sprawdza status serwera
+      const response = await axios.get(`${serverUrl}/v1/server`, {
+        headers: { key: serverKey },
+      });
+      return res.status(200).json({ ok: true, server: response.data });
     }
 
-    const response = await fetch(`${serverTapUrl}/v1/server/exec`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        key: serverKey,
-      },
-      body: new URLSearchParams({ command, time: "" }),
-    });
+    if (action === "send-command") {
+      if (!command) return res.status(400).json({ error: "Brak komendy!" });
 
-    const text = await response.text();
+      // ServerTap wymaga form-urlencoded
+      const data = querystring.stringify({
+        command: command,
+        time: "",
+      });
 
-    if (!response.ok) {
-      return res.status(response.status).json({ ok: false, error: text });
+      const response = await axios.post(
+        `${serverUrl}/v1/server/exec`,
+        data,
+        {
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            key: serverKey,
+          },
+        }
+      );
+
+      return res.status(200).json({ ok: true, response: response.data });
     }
 
-    return res.status(200).json({ ok: true, response: text });
+    return res.status(400).json({ error: "Nieprawidłowe action" });
   } catch (err) {
-    console.error("❌ ServerTap proxy error:", err);
-    return res.status(500).json({ ok: false, error: err.message });
+    console.error("ServerTap error:", err.message);
+    return res
+      .status(500)
+      .json({ error: "Błąd połączenia z ServerTap", details: err.message });
   }
 }
