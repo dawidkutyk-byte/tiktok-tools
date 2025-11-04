@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import io from "socket.io-client";
+import TikTokLiveConnector from "tiktok-live-connector";
 
 export default function App() {
   const [activeTab, setActiveTab] = useState("connect");
@@ -7,12 +8,14 @@ export default function App() {
   const [serverTapUrl, setServerTapUrl] = useState("http://83.168.106.220:21001");
   const [serverKey, setServerKey] = useState("change_me");
   const [wsUrl, setWsUrl] = useState("ws://localhost:4000");
-  const [message, setMessage] = useState(null);
 
   const [isTikTokConnected, setIsTikTokConnected] = useState(false);
   const [isServerTapConnected, setIsServerTapConnected] = useState(false);
   const [ttsEnabled, setTtsEnabled] = useState(false);
   const [connected, setConnected] = useState(false);
+  const [message, setMessage] = useState(null);
+  const socketRef = useRef(null);
+  const tiktokRef = useRef(null);
 
   const [giftsText, setGiftsText] = useState(`{
   "5479": [
@@ -22,25 +25,49 @@ export default function App() {
   ]
 }`);
 
-  const socketRef = useRef(null);
-
+  // --- 🟣 POŁĄCZENIE Z TIKTOK LIVE ---
   async function connectTikTok() {
     setMessage({ type: "info", text: "Łączenie z TikTok Live..." });
     try {
-      const resp = await fetch(`/api/servertap?action=check-live&username=${username}`);
-      const data = await resp.json();
-      if (data.live) {
+      const { TikTokLiveConnection } = await import("tiktok-live-connector");
+      const tiktok = new TikTokLiveConnection(username);
+      tiktokRef.current = tiktok;
+
+      tiktok.connect().then((state) => {
         setIsTikTokConnected(true);
-        setMessage({ type: "success", text: `Połączono z LIVE TikToka: ${username}` });
-      } else {
+        setMessage({ type: "success", text: `✅ Połączono z LIVE TikToka: ${username}` });
+      });
+
+      tiktok.on("gift", async (data) => {
+        const gifts = JSON.parse(giftsText);
+        const giftId = data.giftId?.toString();
+        const nickname = data.user.uniqueId;
+        const repeatcount = data.repeatCount || 1;
+        const giftname = data.giftName || "prezent";
+
+        if (gifts[giftId]) {
+          const commands = Array.isArray(gifts[giftId]) ? gifts[giftId] : [gifts[giftId]];
+          for (let command of commands) {
+            command = command
+              .replace(/{nickname}/g, nickname)
+              .replace(/{repeatcount}/g, repeatcount)
+              .replace(/{giftname}/g, giftname);
+            await sendCommandToServerTap(command);
+          }
+        }
+      });
+
+      tiktok.on("disconnected", () => {
         setIsTikTokConnected(false);
-        setMessage({ type: "error", text: `Live ${username} jest offline.` });
-      }
+        setMessage({ type: "error", text: "❌ Rozłączono z TikTok Live" });
+      });
     } catch (err) {
-      setMessage({ type: "error", text: "Błąd połączenia z TikTok." });
+      console.error("TikTok error:", err);
+      setMessage({ type: "error", text: "Błąd połączenia z TikTok Live." });
     }
   }
 
+  // --- 🟢 POŁĄCZENIE Z SERVERTAP ---
   async function connectServerTap() {
     setMessage({ type: "info", text: "Sprawdzanie połączenia z ServerTap..." });
     try {
@@ -49,7 +76,7 @@ export default function App() {
       });
       if (resp.ok) {
         setIsServerTapConnected(true);
-        setMessage({ type: "success", text: "Połączono z ServerTap!" });
+        setMessage({ type: "success", text: "✅ Połączono z ServerTap!" });
       } else {
         setIsServerTapConnected(false);
         setMessage({ type: "error", text: "Nie udało się połączyć z ServerTap." });
@@ -60,60 +87,69 @@ export default function App() {
     }
   }
 
-async function testTrigger() {
-  if (!isServerTapConnected) {
-    setMessage({ type: "error", text: "Brak połączenia z ServerTap!" });
-    return;
-  }
-
-  const command =
-    'execute as @a at @s run summon zombie ~ ~ ~ {CustomName:\'{"text":"TEST ZOMBIE"}\',CustomNameVisible:1b}';
-
-  try {
-    const res = await fetch("/api/servertap?action=send-command", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        command,
-        serverUrl: serverTapUrl,
-        serverKey: serverKey,
-      }),
-    });
-
-    const data = await res.json();
-    if (data.ok) {
-      setMessage({ type: "success", text: "✅ Komenda wysłana do Minecrafta!" });
-    } else {
-      setMessage({
-        type: "error",
-        text: data.error || "❌ Błąd podczas wysyłania komendy.",
-      });
+  // --- 🧪 TEST TRIGGER ---
+  async function testTrigger() {
+    if (!isServerTapConnected) {
+      setMessage({ type: "error", text: "Brak połączenia z ServerTap!" });
+      return;
     }
-  } catch (err) {
-    setMessage({ type: "error", text: "❌ Błąd połączenia z API." });
+    const command =
+      'execute as @a at @s run summon zombie ~ ~ ~ {CustomName:\'{"text":"TEST ZOMBIE"}\',CustomNameVisible:1b}';
+    await sendCommandToServerTap(command);
   }
-}
 
+  // --- 💥 FUNKCJA WYSYŁANIA KOMEND DO SERVERTAP ---
+  async function sendCommandToServerTap(command) {
+    try {
+      const formData = new URLSearchParams();
+      formData.append("command", command);
+      formData.append("time", "");
 
-  // --- TTS CHAT (socket.io) ---
+      const res = await fetch(`${serverTapUrl}/v1/server/exec`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          key: serverKey,
+        },
+        body: formData.toString(),
+      });
+
+      if (res.ok) {
+        setMessage({ type: "success", text: "✅ Komenda wysłana do Minecrafta!" });
+      } else {
+        const errText = await res.text();
+        setMessage({ type: "error", text: `⚠️ Błąd: ${errText}` });
+      }
+    } catch (err) {
+      console.error("Błąd wysyłania:", err);
+      setMessage({ type: "error", text: "❌ Nie udało się wysłać komendy (sprawdź CORS w ServerTap)." });
+    }
+  }
+
+  // --- 🔊 TTS CHAT ---
   useEffect(() => {
     if (!ttsEnabled) {
       if (socketRef.current) socketRef.current.disconnect();
       setConnected(false);
       return;
     }
+
     const socket = io(wsUrl, { transports: ["websocket"] });
     socketRef.current = socket;
+
     socket.on("connect", () => setConnected(true));
     socket.on("disconnect", () => setConnected(false));
+
     socket.on("chat", (data) => {
       const text = `${data.nickname} mówi: ${data.message}`;
       const u = new SpeechSynthesisUtterance(text);
       window.speechSynthesis.speak(u);
     });
+
     return () => socket.disconnect();
   }, [ttsEnabled, wsUrl]);
 
+  // --- RENDER ---
   return (
     <div
       style={{
@@ -182,7 +218,14 @@ async function testTrigger() {
         {activeTab === "gifts" && (
           <div>
             <h2>🎁 Gift Trigger</h2>
+            <p>
+              🔗 Sprawdź ID giftów na stronie:{" "}
+              <a href="https://tapujemy.pl/gifts" target="_blank" style={{ color: "#22d3ee" }}>
+                https://tapujemy.pl/gifts
+              </a>
+            </p>
             <p>Limit: <b>MAX 10 INTERAKCJI</b></p>
+
             <p>📄 Stały testowy trigger:</p>
             <textarea
               readOnly
@@ -204,6 +247,7 @@ async function testTrigger() {
             <p>🎨 Edytowalne ID Gift:</p>
             <textarea
               rows={10}
+              maxLength={2000}
               value={giftsText}
               onChange={(e) => setGiftsText(e.target.value)}
               style={{ width: "100%" }}
